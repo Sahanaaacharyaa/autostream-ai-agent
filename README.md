@@ -1,165 +1,164 @@
-AutoStream AI Agent
-Overview
 
-AutoStream AI Agent is a conversational AI system designed for a fictional SaaS company that provides automated video editing tools for content creators. The agent is capable of handling user queries, retrieving contextual information using RAG, detecting user intent, and executing a structured lead capture workflow.
+# AutoStream AI Agent
 
-The system is built using Streamlit for the interface, LangGraph for state management, LangChain for orchestration, FAISS for vector search, and Groq LLM (Llama 3.1 8B) for reasoning and response generation.
+## 1. Project Overview
 
-Key Features
-1. Intent Detection
+AutoStream AI Agent is a conversational AI system designed for a fictional SaaS company that provides automated video editing tools for content creators. The agent acts as a sales and support assistant capable of handling user queries, retrieving product knowledge, and converting high-intent users into leads through a structured conversation flow.
 
-The agent classifies user input into three categories:
+The system combines:
+- Intent classification
+- Retrieval-Augmented Generation (RAG)
+- Stateful conversation handling
+- Tool execution for lead capture
 
-Greeting (e.g., hi, hello)
-Inquiry (pricing, features, policies)
-High-intent lead (purchase intent like “I want Pro plan”)
+---
 
-A hybrid approach is used:
+## 2. How to Run the Project Locally
 
-Rule-based keyword detection for fast routing
-LLM fallback classification for robustness
-2. RAG (Retrieval-Augmented Generation)
-
-The agent uses a local knowledge base stored in knowledge_base.json, which includes:
-
-Pricing Information
-
-Basic Plan: $29/month, 10 videos/month, 720p resolution
-Pro Plan: $79/month, unlimited videos, 4K resolution, AI captions
-
-Policies
-
-No refunds after 7 days
-24/7 support available only for Pro plan
-
-The data is embedded using sentence-transformers/all-MiniLM-L6-v2 and stored in a FAISS vector database for semantic retrieval.
-
-This ensures:
-
-Accurate responses
-No hallucination
-Context-aware answers
-3. Lead Capture System (Tool Execution)
-
-When high intent is detected, the agent triggers a structured lead collection flow:
-
-It collects:
-
-Name
-Email
-Platform (YouTube / Instagram / TikTok)
-Plan (Basic / Pro)
-
-Only after all required fields are collected, the system executes:
-
-mock_lead_capture(name, email, platform, plan)
-
-This simulates a backend CRM API call.
-
-4. State Management (LangGraph)
-
-The agent uses LangGraph to maintain conversation state across multiple turns.
-
-States handled:
-intent detection
-response generation
-lead collection flow
-Lead flow steps:
-Ask name
-Ask email
-Ask platform
-Ask plan
-Trigger tool execution
-
-This ensures strict control over multi-step conversations and prevents premature API calls.
-
-5. Memory Handling
-
-The system maintains short-term memory of the last 5 chat interactions, allowing:
-
-Context-aware responses
-Continuity in conversation
-Better user experience
-Architecture
-Components
-Streamlit → UI layer
-LangGraph → Conversation state machine
-LangChain → Prompt + LLM orchestration
-FAISS → Vector similarity search
-HuggingFace Embeddings → Text vectorization
-Groq LLM → Response generation
-Flow
-User input is received
-Intent is detected
-Router decides:
-Respond (RAG-based answer)
-Lead flow (multi-step collection)
-If lead flow:
-Collect user details step-by-step
-Validate inputs
-Execute mock API
-Response is displayed in Streamlit UI
-How to Run the Project
-1. Clone the repository
-git clone https://github.com/your-username/autostream-ai-agent.git
+### Step 1: Clone the Repository
+```bash
+git clone https://github.com/Sahanaaacharyaa/autostream-ai-agent.git
 cd autostream-ai-agent
-2. Install dependencies
+````
+
+### Step 2: Create Virtual Environment (optional but recommended)
+
+```bash
+python -m venv venv
+source venv/bin/activate   # Mac/Linux
+venv\Scripts\activate      # Windows
+```
+
+### Step 3: Install Dependencies
+
+```bash
 pip install -r requirements.txt
-3. Set environment variables
+```
 
-Create a .env file:
+### Step 4: Add Environment Variables
 
+Create a `.env` file:
+
+```env
 GROQ_API_KEY=your_api_key_here
-4. Run the application
+```
+
+### Step 5: Run the Application
+
+```bash
 streamlit run main.py
-Requirements
+```
 
-Example requirements.txt:
+---
 
-streamlit
-langchain
-langgraph
-langchain-groq
-langchain-community
-faiss-cpu
-sentence-transformers
-python-dotenv
+## 3. Architecture Explanation (≈200 words)
 
+The system is built using a modular agent architecture powered by LangGraph. LangGraph was chosen over AutoGen because it provides better control over state transitions and deterministic workflow design, which is essential for structured lead collection flows.
 
-The agent can be extended to WhatsApp using:
+The architecture consists of three main components:
 
-Option 1: Twilio WhatsApp API
-Webhook receives WhatsApp messages
-Messages forwarded to LangGraph agent
-Response sent back via API
-Option 2: Meta WhatsApp Cloud API
-Use webhook endpoint for message ingestion
-Connect backend to LangGraph pipeline
-Flow:
+1. **Intent Detection Node**
+   The user input is classified into three categories: greeting, inquiry, or high-intent. This ensures that the conversation is routed correctly from the beginning.
 
-User (WhatsApp) → Webhook → AI Agent → Response → WhatsApp
+2. **RAG Pipeline**
+   A FAISS vector database stores embeddings of the product knowledge base, including pricing and policies. When a user asks a question, the system retrieves relevant context using HuggingFace embeddings and passes it to the LLM for grounded response generation. This prevents hallucinations and ensures factual accuracy.
 
-Why LangGraph?
+3. **Lead Capture Tool Execution**
+   When high intent is detected, the system transitions into a multi-step state machine that collects user details (name, email, platform, plan). LangGraph maintains state across steps, ensuring smooth conversation continuity. Once all required data is collected, a mock API function is triggered to simulate lead capture.
 
-LangGraph is used because it provides:
+State is managed using a dictionary stored in Streamlit session state and passed through LangGraph nodes. This allows persistent memory across multiple turns while keeping the system lightweight and production-ready.
 
-Strong state management for multi-turn flows
-Deterministic routing logic
-Easy handling of structured workflows like lead funnels
-Production-ready conversation control
-Future Improvements
-Persistent database for leads (MongoDB/PostgreSQL)
-Authentication system
-Dashboard for analytics
-WhatsApp / Telegram integration
-Streaming responses for better UX
-Conclusion
+---
 
-This project demonstrates a production-style conversational AI system combining:
+## 4. WhatsApp Deployment (Webhook Integration)
 
-RAG-based knowledge grounding
-Intent-driven conversation flow
-Stateful multi-step tool execution
-Real-world SaaS use case simulation
+To deploy this agent on WhatsApp, the system can be integrated using WhatsApp Business API (or Twilio WhatsApp API).
 
-It is designed to be scalable, modular, and deployable in real business environments.
+### Proposed Flow:
+
+1. A user sends a message on WhatsApp.
+2. The message is received by a backend webhook (Flask/FastAPI server).
+3. The webhook forwards the message to the LangGraph agent.
+4. The agent processes:
+
+   * Intent detection
+   * RAG retrieval
+   * Lead flow (if required)
+5. The response is sent back to WhatsApp API.
+6. User receives real-time reply.
+
+### Architecture Components:
+
+* WhatsApp Business API / Twilio
+* Webhook Server (FastAPI/Flask)
+* LangGraph AI Agent Backend
+* Redis (optional for session tracking)
+
+### Key Idea:
+
+Each WhatsApp user is mapped to a unique session ID (phone number). This ensures persistent conversation state across multiple messages.
+
+---
+
+## 5. System Features
+
+* Intent classification (greeting / inquiry / high-intent)
+* RAG-based knowledge retrieval
+* Stateful multi-turn conversation
+* Lead qualification workflow
+* Mock tool execution for CRM simulation
+
+---
+
+## 6. Tech Stack
+
+* Python 3.9+
+* Streamlit
+* LangChain
+* LangGraph
+* FAISS
+* HuggingFace Embeddings
+* Groq LLM (Llama 3.1)
+
+---
+
+## 7. Knowledge Base
+
+### Pricing
+
+**Basic Plan**
+
+* $29/month
+* 10 videos/month
+* 720p resolution
+
+**Pro Plan**
+
+* $79/month
+* Unlimited videos
+* 4K resolution
+* AI captions
+
+### Policies
+
+* No refunds after 7 days
+* 24/7 support only on Pro plan
+
+---
+
+## 8. Author
+
+Built as part of an AI Agent assignment for AutoStream SaaS platform.
+
+```
+
+---
+
+If you want, I can also give you next:
+- :contentReference[oaicite:0]{index=0}
+- `.gitignore`
+- :contentReference[oaicite:1]{index=1}
+- or :contentReference[oaicite:2]{index=2}
+
+Just tell me.
+```

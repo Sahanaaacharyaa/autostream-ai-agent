@@ -14,17 +14,15 @@ from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
 
 
-# ---------------- ENV ---------------- #
+
 load_dotenv()
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 
-# ---------------- TOOL ---------------- #
 def mock_lead_capture(name, email, platform, plan):
     print(f"\nLEAD CAPTURED: {name}, {email}, {platform}, {plan}\n")
 
 
-# ---------------- KNOWLEDGE BASE ---------------- #
 with open("data/knowledge_base.json") as f:
     KB = json.load(f)
 
@@ -62,7 +60,7 @@ def load_llm():
 llm = load_llm()
 
 
-# ---------------- HELPERS ---------------- #
+
 def is_email(text):
     return bool(re.fullmatch(r"[^@]+@[^@]+\.[^@]+", text))
 
@@ -77,7 +75,7 @@ def is_plan(text):
     return any(p in text for p in ["basic", "pro"])
 
 
-# ---------------- INTENT ---------------- #
+
 intent_prompt = PromptTemplate.from_template("""
 Classify intent:
 - greeting
@@ -92,7 +90,7 @@ Return only one word.
 def detect_intent(state):
     text = state["user_input"].lower()
 
-    # 🔒 BLOCK if already in lead flow
+    
     if state.get("collecting_lead"):
         return state
 
@@ -121,7 +119,7 @@ def detect_intent(state):
 
     return {**state, "intent": "inquiry"}
 
-# ---------------- RAG ---------------- #
+
 def retrieve(query):
     docs = retriever.invoke(query)
     return "\n".join([d.page_content for d in docs])
@@ -157,16 +155,15 @@ User:
     return {**state, "response": res}
 
 
-# ---------------- LEAD FLOW ---------------- #
+
 def lead_flow(state):
 
     step = state.get("lead_step")
 
-    # STEP 1: NAME (ONLY NAME ALLOWED)
+   
     if step == "ask_name":
         name = state["user_input"].strip()
 
-        # prevent junk like "i want to buy"
         if len(name.split()) > 4:
             return {
                 **state,
@@ -177,7 +174,6 @@ def lead_flow(state):
         state["lead_step"] = "ask_email"
         return {**state, "response": "Great! What’s your email?"}
 
-    # STEP 2: EMAIL
     if step == "ask_email":
         if is_email(state["user_input"]):
             state["email"] = state["user_input"]
@@ -186,7 +182,7 @@ def lead_flow(state):
 
         return {**state, "response": "Please enter a valid email."}
 
-    # STEP 3: PLATFORM
+  
     if step == "ask_platform":
         if is_platform(state["user_input"]):
             state["platform"] = state["user_input"].lower().strip()
@@ -195,7 +191,7 @@ def lead_flow(state):
 
         return {**state, "response": "Choose YouTube / Instagram / TikTok"}
 
-    # STEP 4: PLAN (STRICT)
+   
     if step == "ask_plan":
         text = state["user_input"].lower().strip()
 
@@ -220,10 +216,9 @@ def lead_flow(state):
 
     return state
 
-# ---------------- ROUTER ---------------- #
 def route(state):
 
-    # 🔒 HARD PRIORITY: lead always wins
+   
     if state.get("collecting_lead") or state.get("lead_step"):
         return "lead"
 
@@ -236,7 +231,6 @@ def route(state):
     return "respond"
 
 
-# ---------------- GRAPH ---------------- #
 builder = StateGraph(dict)
 
 builder.add_node("intent", detect_intent)
@@ -260,7 +254,7 @@ builder.add_edge("lead", END)
 graph = builder.compile()
 
 
-# ---------------- STREAMLIT UI ---------------- #
+
 st.set_page_config(page_title="AutoStream AI Agent", layout="centered")
 
 st.markdown("""
@@ -305,7 +299,6 @@ st.markdown("<div class='sub-title'>AI assistant for pricing, recommendations an
 st.divider()
 
 
-# ---------------- STATE ---------------- #
 if "state" not in st.session_state:
     st.session_state.state = {
         "user_input": "",
@@ -321,7 +314,6 @@ if "state" not in st.session_state:
     }
 
 
-# ---------------- CHAT ---------------- #
 for msg in st.session_state.state["chat"]:
     align = "flex-end" if msg["role"] == "user" else "flex-start"
     cls = "user-msg" if msg["role"] == "user" else "bot-msg"
@@ -333,7 +325,6 @@ for msg in st.session_state.state["chat"]:
     """, unsafe_allow_html=True)
 
 
-# ---------------- INPUT ---------------- #
 user_input = st.chat_input("Type your message...")
 
 if user_input:
@@ -345,7 +336,6 @@ if user_input:
 
     new_state = graph.invoke(state)
 
-    # 🔒 SAFETY FALLBACK
     if "response" not in new_state or new_state["response"] is None:
         new_state["response"] = "I'm here to help. Could you rephrase?"
 
