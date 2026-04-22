@@ -14,40 +14,37 @@ from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
 
 
-
 load_dotenv()
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 
 def mock_lead_capture(name, email, platform, plan):
-    print(f"\nLEAD CAPTURED: {name}, {email}, {platform}, {plan}\n")
+    print(f"Lead captured successfully: {name}, {email}, {platform}, {plan}")
 
 
 with open("data/knowledge_base.json") as f:
     KB = json.load(f)
 
-
 def build_documents():
     docs = []
     for plan, details in KB["pricing"].items():
         docs.append(Document(page_content=f"{plan} plan: {details}"))
-    for k, v in KB["policies"].items():
-        docs.append(Document(page_content=f"{k}: {v}"))
+    for key, value in KB["policies"].items():
+        docs.append(Document(page_content=f"{key}: {value}"))
     return docs
-
 
 @st.cache_resource
 def load_vectorstore():
     docs = build_documents()
+
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
-    return FAISS.from_documents(docs, embeddings)
 
+    return FAISS.from_documents(docs, embeddings)
 
 vectorstore = load_vectorstore()
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-
 
 @st.cache_resource
 def load_llm():
@@ -56,24 +53,19 @@ def load_llm():
         temperature=0
     )
 
-
 llm = load_llm()
 
 
-
 def is_email(text):
-    return bool(re.fullmatch(r"[^@]+@[^@]+\.[^@]+", text))
-
+    return re.match(r"[^@]+@[^@]+\.[^@]+", text)
 
 def is_platform(text):
     text = text.lower()
     return any(p in text for p in ["youtube", "instagram", "tiktok", "linkedin"])
 
-
 def is_plan(text):
     text = text.lower()
     return any(p in text for p in ["basic", "pro"])
-
 
 
 intent_prompt = PromptTemplate.from_template("""
@@ -86,156 +78,134 @@ User: {input}
 Return only one word.
 """)
 
-
 def detect_intent(state):
     text = state["user_input"].lower()
 
-    
-    if state.get("collecting_lead"):
-        return state
-
-    if any(x in text for x in ["buy", "subscribe", "purchase", "get started", "i want"]):
-        return {
-            **state,
-            "intent": "high_intent",
-            "collecting_lead": True,
-            "lead_step": "ask_name",
-            "name": None,
-            "email": None,
-            "platform": None,
-            "plan": None,
-            "response": "Great! What’s your name?"
-        }
-
-    if any(x in text for x in ["hi", "hello", "hey"]):
+  
+    if "change my mind" in text or "other one" in text or "exit" in text:
         return {
             **state,
             "intent": "greeting",
-            "response": "Hello! How can I help you today?"
+            "collecting_lead": False
         }
 
-    if any(x in text for x in ["price", "plan", "cost", "feature"]):
+    if any(x in text for x in [
+        "buy", "subscribe", "purchase", "sign up",
+        "i want", "sounds good", "let's do it", "get started"
+    ]):
+        return {**state, "intent": "high_intent"}
+
+    if any(x in text for x in [
+        "price", "plan", "cost", "feature", "pricing", "subscription"
+    ]):
         return {**state, "intent": "inquiry"}
 
-    return {**state, "intent": "inquiry"}
+    res = llm.invoke(intent_prompt.format(input=state["user_input"]))
+    intent = res.content.strip().lower()
+
+    if intent not in ["greeting", "inquiry", "high_intent"]:
+        intent = "inquiry"
+
+    return {**state, "intent": intent}
 
 
-def retrieve(query):
+def retrieve_info(query):
     docs = retriever.invoke(query)
     return "\n".join([d.page_content for d in docs])
 
+def generate_response(state):
+    context = retrieve_info(state["user_input"])
 
-def respond(state):
-    context = retrieve(state["user_input"])
+    if not context.strip():
+        return {**state, "response": "I couldn't find that info. Can you rephrase?"}
 
-    history = "\n".join(
-        [f"{m['role']}: {m['text']}" for m in state.get("chat", [])[-5:]]
-    )
+    history = "\n".join([
+        f"{m['role']}: {m['text']}"
+        for m in st.session_state.chat[-5:]
+    ])
 
     prompt = f"""
 You are AutoStream AI assistant.
 
 Rules:
-- Use ONLY context
-- Be concise
-- No hallucination
+- Answer ONLY from context
+- Be clear and structured
+- Do not hallucinate
 
-Chat:
+Conversation:
 {history}
 
 Context:
 {context}
 
 User:
-{state["user_input"]}
+{state['user_input']}
 """
 
-    res = llm.invoke(prompt).content
-
-    return {**state, "response": res}
-
+    res = llm.invoke(prompt)
+    return {**state, "response": res.content}
 
 
-def lead_flow(state):
+def lead_collection(state):
 
-    step = state.get("lead_step")
+    state["collecting_lead"] = True
 
-   
-    if step == "ask_name":
-        name = state["user_input"].strip()
+    if not state.get("name"):
+        return {**state, "response": "Great! Let’s get started — what’s your name?"}
 
-        if len(name.split()) > 4:
-            return {
-                **state,
-                "response": "Please enter a valid name."
-            }
-
-        state["name"] = name
-        state["lead_step"] = "ask_email"
-        return {**state, "response": "Great! What’s your email?"}
-
-    if step == "ask_email":
+    if not state.get("email"):
         if is_email(state["user_input"]):
             state["email"] = state["user_input"]
-            state["lead_step"] = "ask_platform"
+        else:
+            return {**state, "response": "Please enter a valid email (example: name@gmail.com)"}
+
+    if not state.get("platform"):
+        if is_platform(state["user_input"]):
+            state["platform"] = state["user_input"]
+        else:
             return {**state, "response": "Which platform? (YouTube / Instagram / TikTok)"}
 
-        return {**state, "response": "Please enter a valid email."}
-
-  
-    if step == "ask_platform":
-        if is_platform(state["user_input"]):
-            state["platform"] = state["user_input"].lower().strip()
-            state["lead_step"] = "ask_plan"
-            return {**state, "response": "Which plan? (Basic / Pro)"}
-
-        return {**state, "response": "Choose YouTube / Instagram / TikTok"}
+    if not state.get("plan"):
+        if is_plan(state["user_input"]):
+            state["plan"] = state["user_input"].title()
+        else:
+            return {**state, "response": "Which plan do you want? (Basic / Pro)"}
 
    
-    if step == "ask_plan":
-        text = state["user_input"].lower().strip()
+    mock_lead_capture(
+        state["name"],
+        state["email"],
+        state["platform"],
+        state["plan"]
+    )
 
-        if text not in ["basic", "pro"]:
-            return {**state, "response": "❌ Choose ONLY Basic or Pro"}
+    st.success(f"LEAD CAPTURED: {state['name']} | {state['email']} | {state['platform']} | {state['plan']}")
 
-        state["plan"] = text.title()
+    return {
+        "user_input": "",
+        "intent": None,
+        "response": "Done! We’ll contact you soon ",
+        "name": None,
+        "email": None,
+        "platform": None,
+        "plan": None,
+        "collecting_lead": False
+    }
 
-        mock_lead_capture(
-            state["name"],
-            state["email"],
-            state["platform"],
-            state["plan"]
-        )
-
-        return {
-            **state,
-            "response": "🎉 Lead captured successfully! We’ll contact you soon.",
-            "collecting_lead": False,
-            "lead_step": None
-        }
-
-    return state
 
 def route(state):
-
-   
-    if state.get("collecting_lead") or state.get("lead_step"):
+    if state.get("collecting_lead"):
         return "lead"
-
-    if state["intent"] in ["greeting", "inquiry"]:
-        return "respond"
-
     if state["intent"] == "high_intent":
         return "lead"
-
     return "respond"
 
 
 builder = StateGraph(dict)
 
 builder.add_node("intent", detect_intent)
-builder.add_node("respond", respond)
-builder.add_node("lead", lead_flow)
+builder.add_node("respond", generate_response)
+builder.add_node("lead", lead_collection)
 
 builder.set_entry_point("intent")
 
@@ -254,44 +224,83 @@ builder.add_edge("lead", END)
 graph = builder.compile()
 
 
+st.set_page_config(
+    page_title="AutoStream AI Agent",
+    layout="centered"
+)
 
-st.set_page_config(page_title="AutoStream AI Agent", layout="centered")
 
 st.markdown("""
-<style>
-.stApp { background-color: transparent; }
+    <style>
 
-.main-title {
-    font-size: 28px;
-    font-weight: 600;
-    text-align: center;
-}
+    /* Global background */
+    .stApp {
+        background-color: transparent;
+    }
 
-.sub-title {
-    font-size: 14px;
-    text-align: center;
-    opacity: 0.7;
-}
+    /* Title */
+    .main-title {
+        font-size: 28px;
+        font-weight: 600;
+        text-align: center;
+        margin-bottom: 5px;
+        color: inherit;
+    }
 
-.user-msg {
-    max-width: 75%;
-    padding: 10px;
-    border-radius: 12px;
-    background: rgba(0,0,0,0.04);
-    margin-left: auto;
-    margin: 6px 0;
-}
+    .sub-title {
+        font-size: 14px;
+        text-align: center;
+        margin-bottom: 20px;
+        opacity: 0.7;
+    }
 
-.bot-msg {
-    max-width: 75%;
-    padding: 10px;
-    border-radius: 12px;
-    background: rgba(0,0,0,0.07);
-    margin-right: auto;
-    margin: 6px 0;
-}
-</style>
+    /* Chat bubbles */
+    .user-msg {
+        display: inline-block;
+        max-width: 75%;
+        width: fit-content;
+        padding: 10px 12px;
+        margin: 6px 0;
+        border-radius: 12px;
+        border: 0px solid rgba(0,0,0,0.2);
+        background: rgba(0,0,0,0.04);
+
+        /* align right */
+        margin-left: auto;
+        text-align: left;
+        word-wrap: break-word;
+    }
+
+    .bot-msg {
+        display: inline-block;
+        max-width: 75%;
+        width: fit-content;
+        padding: 10px 12px;
+        margin: 6px 0;
+        border-radius: 12px;
+        border: 0px solid rgba(0,0,0,0.2);
+        background: rgba(0,0,0,0.07);
+
+        /* align left */
+        margin-right: auto;
+        text-align: left;
+        word-wrap: break-word;
+    }
+
+    /* Sidebar clean */
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid rgba(0,0,0,0.1);
+    }
+
+    /* Input box spacing */
+    .stChatInputContainer {
+        border-top: 1px solid rgba(0,0,0,0.1);
+        padding-top: 10px;
+    }
+
+    </style>
 """, unsafe_allow_html=True)
+
 
 st.markdown("<div class='main-title'>AutoStream AI Agent</div>", unsafe_allow_html=True)
 st.markdown("<div class='sub-title'>AI assistant for pricing, recommendations and lead capture</div>", unsafe_allow_html=True)
@@ -299,51 +308,90 @@ st.markdown("<div class='sub-title'>AI assistant for pricing, recommendations an
 st.divider()
 
 
+with st.sidebar:
+    st.header("Plans Overview")
+
+    st.subheader("Basic Plan")
+    st.write("• 10 videos per month")
+    st.write("• 720p resolution")
+    st.write("• Standard features")
+
+    st.markdown("---")
+
+    st.subheader("Pro Plan")
+    st.write("• Unlimited videos")
+    st.write("• 4K resolution")
+    st.write("• AI captions")
+    st.write("• 24/7 support")
+
+    st.markdown("---")
+    st.write("Tip: Try asking comparison or pricing questions")
+
+
 if "state" not in st.session_state:
     st.session_state.state = {
         "user_input": "",
         "intent": None,
         "response": None,
-        "chat": [],
         "name": None,
         "email": None,
         "platform": None,
         "plan": None,
-        "collecting_lead": False,
-        "lead_step": None
+        "collecting_lead": False
     }
 
-
-for msg in st.session_state.state["chat"]:
-    align = "flex-end" if msg["role"] == "user" else "flex-start"
-    cls = "user-msg" if msg["role"] == "user" else "bot-msg"
-
-    st.markdown(f"""
-    <div style="display:flex; justify-content:{align};">
-        <div class="{cls}">{msg['text']}</div>
-    </div>
-    """, unsafe_allow_html=True)
+if "chat" not in st.session_state:
+    st.session_state.chat = []
 
 
-user_input = st.chat_input("Type your message...")
+for msg in st.session_state.chat:
+
+    if msg["role"] == "user":
+        st.markdown(f"""
+        <div style="display:flex; justify-content:flex-end;">
+            <div class="user-msg">
+                {msg['text']}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    else:
+        st.markdown(f"""
+        <div style="display:flex; justify-content:flex-start;">
+            <div class="bot-msg">
+                {msg['text']}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+user_input = st.chat_input("Type your message here...")
 
 if user_input:
+
+    st.session_state.chat.append({"role": "user", "text": user_input})
 
     state = st.session_state.state
     state["user_input"] = user_input
 
-    state["chat"].append({"role": "user", "text": user_input})
+ 
+    if state.get("collecting_lead"):
+        if not state.get("name"):
+            state["name"] = user_input
 
-    new_state = graph.invoke(state)
+        elif not state.get("email") and is_email(user_input):
+            state["email"] = user_input
 
-    if "response" not in new_state or new_state["response"] is None:
-        new_state["response"] = "I'm here to help. Could you rephrase?"
+        elif not state.get("platform") and is_platform(user_input):
+            state["platform"] = user_input
 
-    st.session_state.state = new_state
+        elif not state.get("plan") and is_plan(user_input):
+            state["plan"] = user_input.title()
 
-    st.session_state.state["chat"].append({
-        "role": "assistant",
-        "text": new_state["response"]
-    })
+    state = graph.invoke(state)
+    st.session_state.state = state
+
+    response = state["response"]
+
+    st.session_state.chat.append({"role": "assistant", "text": response})
 
     st.rerun()
